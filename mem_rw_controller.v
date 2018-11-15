@@ -82,6 +82,13 @@ wire		w_st_rdst = r_state == ST_RDST;
 wire		w_st_rdct = r_state == ST_RDCT;
 wire		w_st_erpt = r_state == ST_ERPT;
 
+wire		w_timeout = r_timer == r_max_time;
+wire		w_rw_comp = r_rw_b == r_num_b;
+
+// ---------------------------
+// next state logic
+// ---------------------------
+
 always@(*) begin
 	if(~i_reset)
 		w_nxt_state = ST_IDLE;
@@ -98,10 +105,129 @@ always@(*) begin
 		else
 			w_nxt_state = ST_WRST;
 	else if(w_st_wrct)
-	
+		if(w_timeout)
+			w_nxt_state = ST_ERPT;
+		else if(～w_rw_comp)
+			w_nxt_state = ST_WRCT;
+		else if(i_wr_req)
+			w_nxt_state = ST_WRST;
+		else if(i_rd_req)
+			w_nxt_state = ST_RDST;
+		else
+			w_nxt_state = ST_IDLE;
+	else if(w_st_rdst)
+		w_nxt_state = ST_RDCT;
+	else if(w_st_rdct)
+		if(w_timeout)
+			w_nxt_state = ST_ERPT;
+		else if(~w_rw_comp)
+			w_nxt_state = ST_RDCT;
+		else if(i_wr_req)
+			w_nxt_state = ST_WRST;
+		else if(i_rd_req)
+			w_nxt_state = ST_RDST;
+		else
+			w_nxt_state = ST_IDLE;
+	else if(w_st_erpt)
+		if(i_err_ack)
+			w_nxt_state = ST_IDLE;
+		else
+			w_nxt_state = ST_ERPT;	
 	else
 		w_nxt_state = ST_IDLE;	
 end
+
+// ---------------------------
+// timer and time out logic
+// ---------------------------
+
+reg		r_wr_valid_q1;
+
+always@(posedge i_clk or negedge i_reset) begin
+	if(~i_reset) begin
+		r_wr_valid_q1 = 1'b0;
+	end
+	else begin
+		r_wr_valid_q1 = i_wr_valid;
+	end
+end
+
+wire		w_wr_valid_toggle = r_wr_valid_q1 ^ i_wr_valid;
+
+reg		r_wr_valid_q1;
+
+always@(posedge i_clk or negedge i_reset) begin
+	if(~i_reset) begin
+		r_rd_done_q1 = 1'b0;
+	end
+	else begin
+		r_rd_done_q1 = i_rd_done;
+	end
+end
+
+wire		w_rd_done_toggle = r_rd_done_q1 ^ i_rd_done;
+
+wire		w_timer_adv = (w_st_wrct | w_st_rdct);
+
+always@(posedge i_clk or negedge i_reset) begin
+	if(~i_reset) begin
+		r_timer = 5'b0;
+		r_max_time = 5'h0F;
+	end
+	else if(w_timeout | w_wr_valid_toggle | w_rd_done_toggle)
+		r_timer = 5'b0;
+	else if(w_timer_adv)
+		r_timer = r_timer + 1;
+	else
+		r_timer = 5'b0;	
+end
+
+// ---------------------------
+// read write byte count logic
+// ---------------------------
+
+wire		w_rd_step = o_rd_valid & i_rd_done;
+wire		w_wr_step = i_wr_valid & o_wr_done;
+
+always@(posedge i_clk or negedge i_reset) begin
+	if(~i_reset)
+		r_rw_b = 4'b0;
+	else if(w_rd_step | w_wr_step)
+		r_rw_b = r_rw_b + 1;
+	else if(w_st_rdct | w_st_wrct)
+		r_rw_b = r_rw_b;
+	else
+		r_rw_b = 4'b0;
+end
+
+always@(posedge i_clk or negedge i_reset) begin
+	if(~i_reset)
+		r_num_b = 4'b0;
+	else if(w_st_rdst | w_st_wrst)
+		r_num_b = i_num_b;
+	else
+		r_num_b = r_num_b;
+end
+
+// ---------------------------
+// state machine
+// ---------------------------
+
+always@(posedge i_clk) begin
+	r_state = w_nxt_state;
+end
+
+// ---------------------------
+// Memory R/W logic
+// ---------------------------
+
+
+// ---------------------------
+// Output logic
+// ---------------------------
+
+
+
 
 
 endmodule

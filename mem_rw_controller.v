@@ -4,21 +4,20 @@ i_reset,
 
 // write channel
 i_wr_req,
-o_wr_ack,
-i_wr_addr,
 i_wr_data,
-i_wr_num_b,
 i_wr_valid,
 o_wr_done,
 
 // read channel
 i_rd_req,
-o_rd_ack,
-i_rd_addr,
-i_rd_num_b,
 o_rd_data,
 o_rd_valid,
 i_rd_done,
+
+// R/W share signals
+i_addr,
+o_ack,
+i_num_b,
 
 // error report
 o_err,
@@ -69,12 +68,12 @@ reg	[1:0]	r_wr_ptr;
 reg	[4:0]	r_timer;
 reg	[4:0]	r_max_time;
 reg	[2:0]	r_state;
+reg	[2:0]	w_nxt_state;
 
 // mem
 reg	[7:0]	mem	[5:0];
 
 // wire
-wire	[2:0]	w_nxt_state;
 wire		w_st_idle = r_state == ST_IDLE;
 wire		w_st_wrst = r_state == ST_WRST;
 wire		w_st_wrct = r_state == ST_WRCT;
@@ -107,7 +106,7 @@ always@(*) begin
 	else if(w_st_wrct)
 		if(w_timeout)
 			w_nxt_state = ST_ERPT;
-		else if(～w_rw_comp)
+		else if(~w_rw_comp)
 			w_nxt_state = ST_WRCT;
 		else if(i_wr_req)
 			w_nxt_state = ST_WRST;
@@ -154,7 +153,7 @@ end
 
 wire		w_wr_valid_toggle = r_wr_valid_q1 ^ i_wr_valid;
 
-reg		r_wr_valid_q1;
+reg		r_rd_done_q1;
 
 always@(posedge i_clk or negedge i_reset) begin
 	if(~i_reset) begin
@@ -221,13 +220,31 @@ end
 // Memory R/W logic
 // ---------------------------
 
-
+always@(posedge i_clk) begin
+	if(i_wr_valid & w_st_wrct)
+		mem[i_addr] = i_wr_data;
+end	
 // ---------------------------
 // Output logic
 // ---------------------------
 
+assign o_rd_data = mem[i_addr];
+assign o_rd_valid = w_st_rdct;
+assign o_wr_done = i_wr_valid & w_st_wrct;
+assign o_ack = w_st_wrst | w_st_rdst;
+assign o_err = w_st_erpt;
 
+reg		r_err_code;
 
+always@(*) begin
+	if(w_st_wrct & w_timeout)
+		r_err_code = 3'd1;
+	else if(w_st_rdct & w_timeout)
+		r_err_code = 3'd2;
+	else
+		r_err_code = 3'd0;
+end
 
+assign o_err_code = r_err_code;
 
 endmodule

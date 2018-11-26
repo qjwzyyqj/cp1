@@ -17,13 +17,7 @@ i_rd_done,
 // R/W share signals
 i_addr,
 o_ack,
-i_num_b,
-
-// error report
-o_err,
-o_err_code,
-i_err_ack
-
+i_num_b
 );
 
 // input/output
@@ -47,26 +41,18 @@ input	[5:0]	i_addr;
 output		o_ack;
 input 	[3:0]	i_num_b;
 
-// error report
-output 		o_err;
-output 	[2:0]	o_err_code;
-input 		i_err_ack;
-
 // parameters
-parameter	ST_IDLE = 3'd1;
-parameter	ST_WRST = 3'd2;
-parameter	ST_WRCT = 3'd3;
-parameter	ST_RDST = 3'd4;
-parameter	ST_RDCT = 3'd5;
-parameter	ST_ERPT = 3'd6;
+parameter	ST_IDLE = 3'd0;
+parameter	ST_WRST = 3'd1;
+parameter	ST_WRCT = 3'd2;
+parameter	ST_RDST = 3'd3;
+parameter	ST_RDCT = 3'd4;
 
 // reg
 reg	[3:0]	r_num_b;
 reg	[3:0]	r_rw_b;
 reg	[1:0]	r_rd_ptr;
 reg	[1:0]	r_wr_ptr;
-reg	[4:0]	r_timer;
-reg	[4:0]	r_max_time;
 reg	[2:0]	r_state;
 reg	[2:0]	w_nxt_state;
 
@@ -79,10 +65,8 @@ wire		w_st_wrst = r_state == ST_WRST;
 wire		w_st_wrct = r_state == ST_WRCT;
 wire		w_st_rdst = r_state == ST_RDST;
 wire		w_st_rdct = r_state == ST_RDCT;
-wire		w_st_erpt = r_state == ST_ERPT;
 
-wire		w_timeout = r_timer == r_max_time;
-wire		w_rw_comp = r_rw_b == r_num_b;
+wire		w_rw_comp = (r_rw_b == r_num_b - 1) & (w_st_wrct | w_st_rdct);
 
 // ---------------------------
 // next state logic
@@ -104,9 +88,7 @@ always@(*) begin
 		else
 			w_nxt_state = ST_WRST;
 	else if(w_st_wrct)
-		if(w_timeout)
-			w_nxt_state = ST_ERPT;
-		else if(~w_rw_comp)
+		if(~w_rw_comp)
 			w_nxt_state = ST_WRCT;
 		else if(i_wr_req)
 			w_nxt_state = ST_WRST;
@@ -117,9 +99,7 @@ always@(*) begin
 	else if(w_st_rdst)
 		w_nxt_state = ST_RDCT;
 	else if(w_st_rdct)
-		if(w_timeout)
-			w_nxt_state = ST_ERPT;
-		else if(~w_rw_comp)
+		if(~w_rw_comp)
 			w_nxt_state = ST_RDCT;
 		else if(i_wr_req)
 			w_nxt_state = ST_WRST;
@@ -127,85 +107,35 @@ always@(*) begin
 			w_nxt_state = ST_RDST;
 		else
 			w_nxt_state = ST_IDLE;
-	else if(w_st_erpt)
-		if(i_err_ack)
-			w_nxt_state = ST_IDLE;
-		else
-			w_nxt_state = ST_ERPT;	
 	else
 		w_nxt_state = ST_IDLE;	
-end
-
-// ---------------------------
-// timer and time out logic
-// ---------------------------
-
-reg		r_wr_valid_q1;
-
-always@(posedge i_clk or negedge i_reset) begin
-	if(~i_reset) begin
-		r_wr_valid_q1 = 1'b0;
-	end
-	else begin
-		r_wr_valid_q1 = i_wr_valid;
-	end
-end
-
-wire		w_wr_valid_toggle = r_wr_valid_q1 ^ i_wr_valid;
-
-reg		r_rd_done_q1;
-
-always@(posedge i_clk or negedge i_reset) begin
-	if(~i_reset) begin
-		r_rd_done_q1 = 1'b0;
-	end
-	else begin
-		r_rd_done_q1 = i_rd_done;
-	end
-end
-
-wire		w_rd_done_toggle = r_rd_done_q1 ^ i_rd_done;
-
-wire		w_timer_adv = (w_st_wrct | w_st_rdct);
-
-always@(posedge i_clk or negedge i_reset) begin
-	if(~i_reset) begin
-		r_timer = 5'b0;
-		r_max_time = 5'h0F;
-	end
-	else if(w_timeout | w_wr_valid_toggle | w_rd_done_toggle)
-		r_timer = 5'b0;
-	else if(w_timer_adv)
-		r_timer = r_timer + 1;
-	else
-		r_timer = 5'b0;	
 end
 
 // ---------------------------
 // read write byte count logic
 // ---------------------------
 
-wire		w_rd_step = o_rd_valid & i_rd_done;
-wire		w_wr_step = i_wr_valid & o_wr_done;
+wire		w_rd_step = o_rd_valid & i_rd_done & ~(r_rw_b == r_num_b);
+wire		w_wr_step = i_wr_valid & o_wr_done & ~(r_rw_b == r_num_b);
 
 always@(posedge i_clk or negedge i_reset) begin
 	if(~i_reset)
-		r_rw_b = 4'b0;
+		r_rw_b <= 4'b0;
 	else if(w_rd_step | w_wr_step)
-		r_rw_b = r_rw_b + 1;
+		r_rw_b <= r_rw_b + 1;
 	else if(w_st_rdct | w_st_wrct)
-		r_rw_b = r_rw_b;
+		r_rw_b <= r_rw_b;
 	else
-		r_rw_b = 4'b0;
+		r_rw_b <= 4'b0;
 end
 
 always@(posedge i_clk or negedge i_reset) begin
 	if(~i_reset)
-		r_num_b = 4'b0;
+		r_num_b <= 4'b0;
 	else if(w_st_rdst | w_st_wrst)
-		r_num_b = i_num_b;
+		r_num_b <= i_num_b;
 	else
-		r_num_b = r_num_b;
+		r_num_b <= r_num_b;
 end
 
 // ---------------------------
@@ -213,7 +143,7 @@ end
 // ---------------------------
 
 always@(posedge i_clk) begin
-	r_state = w_nxt_state;
+	r_state <= w_nxt_state;
 end
 
 // ---------------------------
@@ -221,30 +151,46 @@ end
 // ---------------------------
 
 always@(posedge i_clk) begin
-	if(i_wr_valid & w_st_wrct)
-		mem[i_addr] = i_wr_data;
+	if(i_wr_valid & w_st_wrct & ~w_rw_comp)
+		mem[i_addr] <= i_wr_data;
 end	
 // ---------------------------
 // Output logic
 // ---------------------------
 
 assign o_rd_data = mem[i_addr];
-assign o_rd_valid = w_st_rdct;
-assign o_wr_done = i_wr_valid & w_st_wrct;
-assign o_ack = w_st_wrst | w_st_rdst;
-assign o_err = w_st_erpt;
 
-reg		r_err_code;
+reg		o_rd_valid;
 
-always@(*) begin
-	if(w_st_wrct & w_timeout)
-		r_err_code = 3'd1;
-	else if(w_st_rdct & w_timeout)
-		r_err_code = 3'd2;
+always@(posedge i_clk or negedge i_reset) begin
+	if(~i_reset)
+		o_rd_valid <= 1'd0;
+	else if(w_st_rdct)
+		o_rd_valid <= 1'd1;
 	else
-		r_err_code = 3'd0;
+		o_rd_valid <= 1'd0;
 end
 
-assign o_err_code = r_err_code;
+reg		o_wr_done;
+
+always@(posedge i_clk or negedge i_reset) begin
+	if(~i_reset)
+		o_wr_done <= 1'd0;
+	else if(i_wr_valid & (w_st_wrct) & ~w_rw_comp)
+		o_wr_done <= 1'd1;
+	else
+		o_wr_done <= 1'd0;
+end
+
+reg		o_ack;
+
+always@(posedge i_clk or negedge i_reset) begin
+	if(~i_reset)
+		o_ack <= 1'd0;
+	else if(w_st_wrst | w_st_rdst)
+		o_ack <= 1'd1;
+	else
+		o_ack <= 1'd0;
+end
 
 endmodule
